@@ -178,6 +178,13 @@ const LessonPlanGenerator = () => {
     const [isLoading, setIsLoading] = useState(false);
     const previewRef = useRef(null);
 
+    // ステップインジケーター用セクションref
+    const stepRef1 = useRef(null); // 単元コンテキスト
+    const stepRef2 = useRef(null); // 本時の設計
+    const stepRef3 = useRef(null); // 先生の理念
+    const stepRef4 = useRef(null); // 様式・資料
+    const stepRef5 = useRef(null); // 生成ボタン
+
     // AI修正チャット
     const [chatMessages, setChatMessages] = useState([]);
     const [chatInput, setChatInput] = useState('');
@@ -256,6 +263,34 @@ const LessonPlanGenerator = () => {
         stopVoice(); setShowTeacherModal(false);
     };
     const filledTeacherCount = TEACHER_QUESTIONS.filter(q => teacherProfile[q.key]?.trim()).length;
+
+    // ステップの完了判定
+    const stepDone = (n) => {
+        if (n === 1) return !!(grade || subject || unitName);
+        if (n === 2) return !!lessonObjective.trim();
+        if (n === 3) return filledTeacherCount > 0;
+        if (n === 4) return templateFiles.length > 0 || !!templateText || refFiles.length > 0 || !!refText;
+        if (n === 5) return !!generatedPlan;
+        return false;
+    };
+
+    // 現在フォーカスすべきステップ
+    const currentStep = (() => {
+        if (layoutMode === 'refine' || generatedPlan) return 6;
+        if (isLoading) return 5;
+        if (lessonObjective.trim()) return 5;
+        if (grade || subject || unitName) return 2;
+        return 1;
+    })();
+
+    // ステップクリック → 対応セクションへスクロール
+    const scrollToStep = (n) => {
+        setLayoutMode('design');
+        const refs = [null, stepRef1, stepRef2, stepRef3, stepRef4, stepRef5];
+        setTimeout(() => {
+            refs[n]?.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 50);
+    };
 
     // ───── 本時の設計プロフィール ─────
     const updateLessonProfile = (key, value) => setLessonProfile(prev => ({ ...prev, [key]: value }));
@@ -683,23 +718,39 @@ ${templateText ? `## 指導案様式（テキスト抽出）\n${templateText}` :
                         { step: 5, label: '生成' },
                         { step: 6, label: 'AI精錬', refine: true },
                     ].map((s, i, arr) => {
-                        const isRefine = s.refine;
-                        const isActive = layoutMode === 'refine' ? isRefine : s.step <= 5;
-                        const isCurrent = layoutMode === 'refine' ? isRefine : s.step === 5;
+                        const isRefine = !!s.refine;
+                        const isCurrent = s.step === currentStep;
+                        const isDone = !isRefine && stepDone(s.step);
+                        const isLocked = isRefine ? !generatedPlan : false;
+
                         return (
                             <React.Fragment key={s.step}>
                                 <button
-                                    onClick={() => { if (!isRefine) setLayoutMode('design'); else if (generatedPlan) setLayoutMode('refine'); }}
+                                    disabled={isLocked}
+                                    onClick={() => {
+                                        if (isRefine) { if (generatedPlan) setLayoutMode('refine'); }
+                                        else scrollToStep(s.step);
+                                    }}
                                     className={cn(
                                         "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all",
-                                        isCurrent ? "bg-teal-600 text-white shadow-sm"
-                                            : isActive && !isRefine ? "bg-teal-50 text-teal-600"
-                                            : isRefine && generatedPlan ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
-                                            : "text-slate-400 cursor-default"
+                                        isCurrent
+                                            ? "bg-teal-600 text-white shadow-sm"
+                                            : isDone
+                                            ? "bg-teal-100 text-teal-700 hover:bg-teal-200"
+                                            : isRefine && generatedPlan
+                                            ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                                            : isLocked
+                                            ? "text-slate-300 cursor-default"
+                                            : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
                                     )}
                                 >
-                                    <span className={cn("w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black shrink-0", isCurrent ? "bg-white text-teal-600" : "bg-current/20")}>
-                                        {s.step}
+                                    <span className={cn(
+                                        "w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black shrink-0",
+                                        isCurrent ? "bg-white text-teal-600"
+                                            : isDone ? "bg-teal-500 text-white"
+                                            : "bg-current/20"
+                                    )}>
+                                        {isDone ? '✓' : s.step}
                                     </span>
                                     {s.label}
                                 </button>
@@ -744,7 +795,7 @@ ${templateText ? `## 指導案様式（テキスト抽出）\n${templateText}` :
                     </AnimatePresence>
 
                     {/* ① 単元コンテキスト */}
-                    <div className={cn("rounded-xl shadow-premium p-6 space-y-4 border", hasInherited ? "bg-gradient-to-br from-teal-600 to-cyan-700 text-white border-teal-500" : "bg-white border-slate-100")}>
+                    <div ref={stepRef1} className={cn("rounded-xl shadow-premium p-6 space-y-4 border", hasInherited ? "bg-gradient-to-br from-teal-600 to-cyan-700 text-white border-teal-500" : "bg-white border-slate-100")}>
                         <h3 className={cn("font-bold flex items-center gap-2", hasInherited ? "text-white" : "text-slate-700")}>
                             <GraduationCap className="w-5 h-5" />
                             単元コンテキスト
@@ -788,7 +839,7 @@ ${templateText ? `## 指導案様式（テキスト抽出）\n${templateText}` :
                     </div>
 
                     {/* ② 本時の設計 */}
-                    <div className="bg-white rounded-xl shadow-premium p-6 space-y-4 border border-slate-100">
+                    <div ref={stepRef2} className="bg-white rounded-xl shadow-premium p-6 space-y-4 border border-slate-100">
                         <h3 className="font-bold text-slate-700 flex items-center gap-2">
                             <Clock className="w-5 h-5 text-teal-500" /> 本時の基本設計
                         </h3>
@@ -851,6 +902,7 @@ ${templateText ? `## 指導案様式（テキスト抽出）\n${templateText}` :
 
                     {/* ③ 先生の指導理念 */}
                     <button
+                        ref={stepRef3}
                         onClick={() => setShowTeacherModal(true)}
                         className="bg-gradient-to-br from-pink-500 to-rose-600 rounded-xl shadow-float text-white p-5 relative overflow-hidden group text-left w-full transition-all hover:shadow-xl hover:scale-[1.01]"
                     >
@@ -866,7 +918,7 @@ ${templateText ? `## 指導案様式（テキスト抽出）\n${templateText}` :
                     </button>
 
                     {/* ④ 指導案様式・参考資料 */}
-                    <div className="bg-gradient-to-br from-violet-600 to-purple-700 rounded-xl shadow-float text-white p-5 relative overflow-hidden">
+                    <div ref={stepRef4} className="bg-gradient-to-br from-violet-600 to-purple-700 rounded-xl shadow-float text-white p-5 relative overflow-hidden">
                         <div className="absolute top-0 right-0 p-4 opacity-10"><Layout className="w-20 h-20" /></div>
                         <h3 className="font-bold text-base mb-1 flex items-center gap-2 relative z-10">
                             <Layout className="w-4 h-4" /> 指導案様式・参考資料
@@ -926,6 +978,7 @@ ${templateText ? `## 指導案様式（テキスト抽出）\n${templateText}` :
 
                     {/* 生成ボタン */}
                     <button
+                        ref={stepRef5}
                         onClick={handleGenerate}
                         disabled={isLoading || !aiEnabled}
                         className={cn(
