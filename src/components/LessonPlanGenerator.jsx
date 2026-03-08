@@ -126,7 +126,8 @@ const LessonPlanGenerator = () => {
 
     // 設定
     const [showSettings, setShowSettings] = useState(false);
-    const [model, setModel] = useState('gemini-1.5-flash');
+    const [model, setModel] = useState('gemini-2.0-flash'); // fallback default
+    const [connectionStatus, setConnectionStatus] = useState('idle');
     const [aiEnabled, setAiEnabled] = useState(() => localStorage.getItem('shidouan_ai_enabled') !== 'false');
 
     // 単元コンテキスト（引き継ぎ or 手入力）
@@ -224,6 +225,41 @@ const LessonPlanGenerator = () => {
         // IndexedDB からフォルダハンドルを復元
         loadHandleIDB().then(h => { if (h) setFolderHandle(h); });
     }, []);
+
+    // ───── APIキー設定時にモデル自動検出 ─────
+    useEffect(() => {
+        if (!apiKey) return;
+        setConnectionStatus('testing');
+        fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) throw new Error(data.error.message);
+                const valid = (data.models || []).filter(m =>
+                    m.name.includes('gemini') &&
+                    m.supportedGenerationMethods?.includes('generateContent') &&
+                    !m.name.includes('embedding') &&
+                    !m.name.includes('aqa')
+                );
+                if (valid.length === 0) throw new Error('No valid models');
+                const score = (name) => {
+                    let s = 0;
+                    if (name.includes('2.5')) s += 300;
+                    else if (name.includes('2.0')) s += 200;
+                    else if (name.includes('1.5')) s += 100;
+                    if (name.includes('flash')) s += 10;
+                    return s;
+                };
+                const best = valid
+                    .map(m => m.name.replace('models/', ''))
+                    .sort((a, b) => score(b) - score(a))[0];
+                setModel(best);
+                setConnectionStatus('success');
+            })
+            .catch(() => {
+                setConnectionStatus('error');
+                setModel('gemini-2.0-flash');
+            });
+    }, [apiKey]);
 
     // ───── ヘルパー関数 ─────
     const saveToHistory = (plan, label) => {
@@ -777,17 +813,40 @@ ${templateText ? `## 指導案様式（テキスト抽出）\n${templateText}` :
                             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="bg-white rounded-xl shadow-premium border border-teal-100 overflow-hidden">
                                 <div className="p-5 space-y-3">
                                     <h3 className="font-bold text-teal-900 flex items-center gap-2"><Settings className="w-4 h-4" /> システム設定</h3>
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-500 mb-1">使用モデル</label>
-                                        <select value={model} onChange={e => setModel(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm">
-                                            <option value="gemini-1.5-flash">Gemini 1.5 Flash（推奨）</option>
-                                            <option value="gemini-1.5-pro">Gemini 1.5 Pro（高品質）</option>
-                                            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                                        </select>
-                                    </div>
-                                    <div className={cn("flex items-center gap-3 p-3 rounded-lg border text-xs font-semibold", apiKey ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-amber-50 border-amber-200 text-amber-800")}>
-                                        <div className={cn("w-2.5 h-2.5 rounded-full shrink-0", apiKey ? "bg-emerald-500" : "bg-amber-400 animate-pulse")} />
-                                        {apiKey ? <>Gemini APIキー連携済み<br /><span className="font-normal opacity-70">Nova Lab Pro から自動取得</span></> : <>APIキー未取得<br /><span className="font-normal">Nova Lab Pro の「設定・連携」で登録してください</span></>}
+                                    <div className={cn(
+                                        "flex items-start gap-3 p-3 rounded-lg border text-xs font-semibold",
+                                        apiKey && connectionStatus !== 'error'
+                                            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                                            : connectionStatus === 'error'
+                                            ? "bg-red-50 border-red-200 text-red-800"
+                                            : "bg-amber-50 border-amber-200 text-amber-800"
+                                    )}>
+                                        <div className={cn(
+                                            "w-2.5 h-2.5 rounded-full shrink-0 mt-0.5",
+                                            connectionStatus === 'testing' ? "bg-blue-400 animate-pulse"
+                                            : connectionStatus === 'success' ? "bg-emerald-500"
+                                            : connectionStatus === 'error' ? "bg-red-500"
+                                            : apiKey ? "bg-emerald-500" : "bg-amber-400 animate-pulse"
+                                        )} />
+                                        <div className="leading-snug">
+                                            {!apiKey ? (
+                                                <>APIキー未取得<br /><span className="font-normal">Nova Lab Pro の「設定・連携」で登録してください</span></>
+                                            ) : connectionStatus === 'testing' ? (
+                                                <>モデルを自動検出中...</>
+                                            ) : connectionStatus === 'error' ? (
+                                                <>接続エラー<br /><span className="font-normal">APIキーを確認してください</span></>
+                                            ) : (
+                                                <>
+                                                    Gemini APIキー連携済み<br />
+                                                    <span className="font-normal opacity-70">Nova Lab Pro から自動取得</span>
+                                                    {model && (
+                                                        <span className="block mt-1 font-normal">
+                                                            使用モデル: <span className="font-bold">{model}</span>（自動選択）
+                                                        </span>
+                                                    )}
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </motion.div>
