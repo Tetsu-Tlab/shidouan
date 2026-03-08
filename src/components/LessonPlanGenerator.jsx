@@ -118,6 +118,8 @@ const QUICK_CHIPS = [
     { label: '📝 振り返り活動を充実', instruction: 'まとめ・振り返り活動をより充実させ、次時への接続も書いてください。' },
 ];
 
+const GEMINI_PROXY = 'https://tlab-api.vercel.app/api/gemini';
+
 // ───────────────────────────────────────────
 // メインコンポーネント
 // ───────────────────────────────────────────
@@ -226,40 +228,31 @@ const LessonPlanGenerator = () => {
         loadHandleIDB().then(h => { if (h) setFolderHandle(h); });
     }, []);
 
-    // ───── APIキー設定時にモデル自動検出 ─────
+    // ───── 起動時にプロキシ経由でモデル自動検出 ─────
     useEffect(() => {
-        if (!apiKey) return;
         setConnectionStatus('testing');
-        fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`)
+        const score = (name) => {
+            let s = 0;
+            if (name.includes('2.5')) s += 300;
+            else if (name.includes('2.0')) s += 200;
+            else if (name.includes('1.5')) s += 100;
+            if (name.includes('flash')) s += 10;
+            return s;
+        };
+        fetch(GEMINI_PROXY)
             .then(r => r.json())
             .then(data => {
-                if (data.error) throw new Error(data.error.message);
-                const valid = (data.models || []).filter(m =>
-                    m.name.includes('gemini') &&
-                    m.supportedGenerationMethods?.includes('generateContent') &&
-                    !m.name.includes('embedding') &&
-                    !m.name.includes('aqa')
-                );
-                if (valid.length === 0) throw new Error('No valid models');
-                const score = (name) => {
-                    let s = 0;
-                    if (name.includes('2.5')) s += 300;
-                    else if (name.includes('2.0')) s += 200;
-                    else if (name.includes('1.5')) s += 100;
-                    if (name.includes('flash')) s += 10;
-                    return s;
-                };
-                const best = valid
-                    .map(m => m.name.replace('models/', ''))
+                if (data.error) throw new Error(data.error);
+                const best = (data.models || [])
+                    .map(m => m.name)
                     .sort((a, b) => score(b) - score(a))[0];
-                setModel(best);
+                if (best) setModel(best);
                 setConnectionStatus('success');
             })
             .catch(() => {
                 setConnectionStatus('error');
-                setModel('gemini-2.0-flash');
             });
-    }, [apiKey]);
+    }, []);
 
     // ───── ヘルパー関数 ─────
     const saveToHistory = (plan, label) => {
@@ -438,7 +431,6 @@ const LessonPlanGenerator = () => {
     // ───── AI 生成 ─────
     const handleGenerate = async () => {
         if (!aiEnabled) { alert('AIがOFFになっています。ヘッダーのトグルボタンでONにしてください。'); return; }
-        if (!apiKey) { alert('APIキーが未設定です。Nova Lab Pro の「設定・連携」タブでGemini APIキーを登録してください。'); return; }
         if (!lessonObjective.trim()) { alert('「本時のねらい」を入力してください。'); return; }
 
         setIsLoading(true);
@@ -585,10 +577,11 @@ ${templateText ? `## 指導案様式（テキスト抽出）\n${templateText}` :
             templateFiles.forEach(f => parts.push({ inlineData: { mimeType: f.mimeType, data: f.data } }));
             refFiles.forEach(f => parts.push({ inlineData: { mimeType: f.mimeType, data: f.data } }));
 
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-                { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }] }) }
-            );
+            const res = await fetch(GEMINI_PROXY, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model, contents: [{ parts }] })
+            });
             const data = await res.json();
             if (data.error) throw new Error(data.error.message);
             const text = data.candidates[0].content.parts[0].text;
@@ -608,7 +601,7 @@ ${templateText ? `## 指導案様式（テキスト抽出）\n${templateText}` :
     const handleChatSend = async (instruction) => {
         const text = (instruction || chatInput).trim();
         if (!text || !generatedPlan) return;
-        if (!aiEnabled || !apiKey) { alert('AIがOFFまたはAPIキー未設定です。'); return; }
+        if (!aiEnabled) { alert('AIがOFFになっています。'); return; }
 
         setChatMessages(prev => [...prev, { role: 'user', content: text }]);
         setChatInput('');
@@ -618,10 +611,11 @@ ${templateText ? `## 指導案様式（テキスト抽出）\n${templateText}` :
 
         try {
             const prompt = `以下は現在作成中の学習指導案です：\n\n${generatedPlan}\n\n---\nユーザーからの修正依頼：「${text}」\n\n上記の修正依頼に従い、学習指導案を修正してください。修正後の完全な指導案のみをMarkdown形式で出力してください。説明文・前置きは一切不要です。`;
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-                { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }
-            );
+            const res = await fetch(GEMINI_PROXY, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model, contents: [{ parts: [{ text: prompt }] }] })
+            });
             const data = await res.json();
             if (data.error) throw new Error(data.error.message);
             const revised = data.candidates[0].content.parts[0].text;
