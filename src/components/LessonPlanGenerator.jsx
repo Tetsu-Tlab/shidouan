@@ -118,7 +118,7 @@ const QUICK_CHIPS = [
     { label: '📝 振り返り活動を充実', instruction: 'まとめ・振り返り活動をより充実させ、次時への接続も書いてください。' },
 ];
 
-const GEMINI_PROXY = 'https://tlab-api.vercel.app/api/gemini';
+const GEMINI_PROXY = 'https://tlab-api-drab.vercel.app/api/gemini';
 
 // ───────────────────────────────────────────
 // メインコンポーネント
